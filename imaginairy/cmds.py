@@ -1,5 +1,6 @@
 import logging
 import math
+import pdb
 
 import click
 from click_shell import shell
@@ -10,6 +11,8 @@ from imaginairy.enhancers.prompt_expansion import expand_prompts
 from imaginairy.log_utils import configure_logging
 from imaginairy.samplers.base import SAMPLER_TYPE_OPTIONS
 from imaginairy.schema import ImaginePrompt
+
+from imaginairy.api_dream import dream_image_files
 
 logger = logging.getLogger(__name__)
 
@@ -266,6 +269,132 @@ def describe(image_filepaths):
 
 
 aimg.add_command(imagine_cmd, name="imagine")
+
+
+@click.argument("prompt_texts", nargs=-1)
+@click.option(
+    "--prompt-strength",
+    default=7.5,
+    show_default=True,
+    help="How closely to follow the prompt. Image looks unnatural at higher values",
+)
+@click.option("--outdir", default="./outputs", help="where to write results to")
+@click.option(
+    "-h",
+    "--height",
+    default=512,
+    type=int,
+    help="image height. should be multiple of 64",
+)
+@click.option(
+    "-w", "--width", default=512, type=int, help="image width. should be multiple of 64"
+)
+@click.option(
+    "--steps",
+    default=40,
+    type=int,
+    show_default=True,
+    help="How many diffusion steps to run. More steps, more detail, but with diminishing returns",
+)
+@click.option(
+    "--seed",
+    default=None,
+    type=int,
+    help="What seed to use for randomness. Allows reproducible image renders",
+)
+@click.option("--upscale", is_flag=True)
+@click.option(
+    "--sampler-type",
+    "--sampler",
+    default="plms",
+    type=click.Choice(SAMPLER_TYPE_OPTIONS),
+    help="What sampling strategy to use",
+)
+@click.option(
+    "--log-level",
+    default="INFO",
+    type=click.Choice(["DEBUG", "INFO", "WARNING", "ERROR"]),
+    help="What level of logs to show.",
+)
+@click.option(
+    "--quiet",
+    "-q",
+    is_flag=True,
+    help="Suppress logs. Alias of `--log-level ERROR`",
+)
+@click.option(
+    "--precision",
+    help="evaluate at this precision",
+    type=click.Choice(["full", "autocast"]),
+    default="autocast",
+)
+@click.option(
+    "--model-weights-path",
+    "--model",
+    help="Model to use. Should be one of SD-1.4, SD-1.5, or a path to custom weights. Defaults to SD-1.5",
+    default=None,
+)
+@click.option(
+    "--prompt-library-path",
+    help="path to folder containing phaselists in txt files. use txt filename in prompt: {_filename_}",
+    type=click.Path(exists=True),
+    default=None,
+    multiple=True,
+)
+@aimg.command()
+def dream(
+    prompt_texts,
+    prompt_strength,
+    outdir,
+    height,
+    width,
+    steps,
+    seed,
+    upscale,
+    sampler_type,
+    log_level,
+    quiet,
+    precision,
+    model_weights_path,
+    prompt_library_path,
+):
+    """Generate a dream from text prompts"""
+    if quiet:
+        log_level = "ERROR"
+    configure_logging(log_level)
+
+    prompts = []
+    prompt_expanding_iterators = {}
+    for prompt_text in prompt_texts:
+        if prompt_text not in prompt_expanding_iterators:
+            prompt_expanding_iterators[prompt_text] = expand_prompts(
+                n=math.inf,
+                prompt_text=prompt_text,
+                prompt_library_paths=prompt_library_path,
+            )
+        prompt_iterator = prompt_expanding_iterators[prompt_text]
+        prompt = ImaginePrompt(
+            next(prompt_iterator),
+            prompt_strength=prompt_strength,
+            seed=seed,
+            sampler_type=sampler_type,
+            steps=steps,
+            height=height,
+            width=width,
+            upscale=upscale,
+            model=model_weights_path,
+        )
+        prompts.append(prompt)
+
+    dream_image_files(
+        prompts,
+        outdir=outdir,
+        output_file_extension="jpg",
+        precision=precision,
+    )
+
+
+aimg.add_command(dream, name="dream")
 
 if __name__ == "__main__":
     imagine_cmd()  # noqa
